@@ -63,22 +63,28 @@ Both containers use readiness and liveness probes.
 ## Debugging story: the DB password / env var mismatch
 
 While redeploying, the app came back with pods running fine but the page throwing a 500. I checked kubectl logs and found a Postgres auth failure — confusing at first, since the network path to Postgres was clearly working. Digging in, I found the deployment YAML was injecting env vars named DB_HOST/DB_USER/DB_PASSWORD/DB_NAME, while the app code was reading POSTGRES_HOST/POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB. Since the code used .get() with a default fallback, the mismatch didn't crash — it silently connected with the wrong credentials instead. Fixed it by aligning the var names to the actual secret keys. It taught me that silent fallbacks in config code can hide real bugs — I'd rather config fail loudly than quietly run wrong.
-## Running it locally
 
-```bash
-kubectl apply -f postgres-secret.yaml
-kubectl apply -f postgres-pvc.yaml
-kubectl apply -f postgres-deployment.yaml
-kubectl apply -f postgres-service.yaml
-kubectl apply -f flask-deployment.yaml
-kubectl apply -f flask-service.yaml
+## Monitoring — RED & USE dashboards (Latest Improvement)
 
-minikube service flask-service --url
-```
+Instrumented the Flask API with `prometheus-flask-exporter` and built a
+Grafana dashboard using the RED method (Rate, Errors, Duration) for the
+app and the USE method (Utilization, Saturation, Errors) for pod/node
+resources. Dashboard JSON is in `monitoring/`.
+
+
+<img width="1600" height="900" alt="Screenshot (78)" src="https://github.com/user-attachments/assets/e78d4ea4-0cdf-4fd5-b01c-47ee2ec6e3b8" />
+
+<img width="1600" height="900" alt="Screenshot (79)" src="https://github.com/user-attachments/assets/909f324e-c0a9-4d16-bb7e-9a26eee85634" />
+
+
+**What I validated with it:**
+- Deleted the Postgres pod mid-traffic and watched Kubernetes reschedule
+  it automatically — confirmed via the pod-restart panel and PVC data
+  persistence (no data loss after restart).
+  
 
 ## Next steps
 
 - EKS deployment (moving from minikube to real AWS-managed Kubernetes)
-- Prometheus/Grafana for monitoring
 - Trivy image scanning in CI/CD
 - ArgoCD for GitOps-based deployment
