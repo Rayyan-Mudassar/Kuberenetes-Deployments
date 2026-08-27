@@ -18,7 +18,7 @@ jobs:
 
       - name: Install deps & run tests
         run: |
-          pip install -r requirements.txt
+          pip install -r requirements.txt --break-system-packages
           pytest -q
 
       - name: Set image tag
