@@ -57,7 +57,7 @@ jobs:
       - name: Smoke test
         run: |
           URL=$(minikube service flask-service --url -n $NAMESPACE)
-          curl -f "$URL/health" || (echo "smoke test failed" && exit 1)
+          curl -f "$URL/api/health" || (echo "smoke test failed" && exit 1)
 
       - name: Apply Grafana alert rules
         run: |
