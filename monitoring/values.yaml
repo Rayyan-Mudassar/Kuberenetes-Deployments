@@ -1,0 +1,6 @@
+grafana:
+  sidecar:
+    alerts:
+      enabled: true
+      label: grafana_alert
+      labelValue: "1"

@@ -41,18 +41,18 @@ jobs:
 
       - name: Deploy to minikube
         run: |
-          kubectl set image deployment/flask-app \
-            flask-app=$IMAGE:${{ steps.vars.outputs.sha_short }} \
-            -n $NAMESPACE
-
-          kubectl apply -f k8s/flask-service.yaml
+          kubectl apply -f k8s/flask-deployment.yaml
           kubectl apply -f k8s/postgres-deployment.yaml
           kubectl apply -f k8s/postgres-pvc.yaml
           kubectl apply -f k8s/postgres-secret.yaml
           kubectl apply -f k8s/postgres-service.yaml
+          kubectl apply -f k8s/flask-service.yaml
           kubectl apply -f k8s/servicemonitor.yaml
 
-          kubectl rollout status deployment/flask-app -n $NAMESPACE --timeout=120s
+          kubectl set image deployment/flask-deployment \
+            flask=$IMAGE:${{ steps.vars.outputs.sha_short }} \
+            -n $NAMESPACE
+          kubectl rollout status deployment/flask-deployment -n $NAMESPACE --timeout=120s
 
       - name: Smoke test
         run: |

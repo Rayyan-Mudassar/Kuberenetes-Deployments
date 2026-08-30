@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: people-directory-contact-points
+  namespace: monitoring
+  labels:
+    grafana_alert: "1"
+data:
+  contact-points.yaml: |
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: discord-alerts
+        receivers:
+          - uid: discord1
+            type: discord
+            settings:
+              url: "https://discord.com/api/webhooks/1543573013449146378/zRKkyelsNV49lFcWyItv-IcRxXmNSHmKbNVkZBa9uLlRy2JiwYsukdHXWmEMuhEGGw6K"
+    policies:
+      - orgId: 1
+        receiver: discord-alerts
+        group_by: ["alertname"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
