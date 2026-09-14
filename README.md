@@ -82,9 +82,19 @@ resources. Dashboard JSON is in `monitoring/`.
   it automatically — confirmed via the pod-restart panel and PVC data
   persistence (no data loss after restart).
   
-
+## CI/CD pipeline
+Added a GitHub Actions workflow (`.github/workflows/ci-cd.yaml`) to automate build, test, and deploy, so a push to the repo takes the app from code to a running cluster state without manual `kubectl apply` steps.
+ 
+### Debugging story: duplicate manifests silently breaking the pipeline
+The pipeline started failing in a way that made no sense — the YAML being applied looked correct, but deploys kept coming out wrong or half-applied. After digging through the run logs, I found the repo actually had **two folders holding the same set of manifests** (leftovers from an earlier restructuring of the project), and the pipeline was picking up files from both — applying whichever version it read last, depending on folder order. Nothing about the pipeline config itself was wrong; the repo's file layout was lying to it. Fixed it by cleaning up the file system so there's a single source of truth for the manifests, then pointing the pipeline explicitly at that one path. Lesson: a CI/CD pipeline is only as trustworthy as the repo structure feeding it — "it works on my machine" bugs can just as easily be "it works because of which folder got globbed first" bugs.
+ 
+## Helm chart (EKS-ready)
+Converted the raw manifests into a Helm chart so the app installs and upgrades as a single `helm install` / `helm upgrade` release — the packaging needed before this moves to real AWS-managed Kubernetes (EKS).
+ 
+### Debugging story: the PVC that wouldn't forget the old password
+After updating the Postgres credentials in the Helm chart's values and re-deploying, Postgres kept authenticating with the **old** password — even though the Secret clearly had the new one. The Postgres pod restarted fine, so at first this looked like the same env-var-mismatch class of bug as before. It wasn't: the PVC already had a Postgres data directory initialized with the old credentials on disk, so every restart just remounted that same old state — Postgres never re-read the new Secret because it doesn't re-initialize an existing data directory. The Helm upgrade had updated the Secret; it had no power over what was already written to the volume. Fixed it by deleting the PV and PVC so Postgres would initialize fresh, and switched to a temporary password generated/injected at runtime for new installs, so future re-deploys don't get stuck fighting stale disk state. Lesson: with PVCs (and StatefulSets in general), `helm upgrade` or `kubectl apply` can't undo what's already persisted — the data directory on disk wins over whatever the Secret currently says.
+ 
 ## Next steps
-
 - EKS deployment (moving from minikube to real AWS-managed Kubernetes)
 - Trivy image scanning in CI/CD
 - ArgoCD for GitOps-based deployment
