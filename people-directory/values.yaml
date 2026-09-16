@@ -1,0 +1,15 @@
+flask:
+  image:
+    repository: rayyan0426/k8s-app
+    tag: latest
+  replicas: 2
+  port: 5000
+
+postgres:
+  image: postgres:15
+  storageSize: 1Gi
+  dbName: peopledb
+  dbUser: appuser
+
+ingress:
+  host: people-directory.local

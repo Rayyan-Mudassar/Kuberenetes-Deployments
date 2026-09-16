@@ -4,7 +4,7 @@ metadata:
   name: people-directory-alerts
   namespace: monitoring
   labels:
-    grafana_alert: "1"   # matches the sidecar's label selector in your Helm values
+    grafana_alert: "1"
 data:
   people-directory-alerts.yaml: |
     apiVersion: 1
@@ -20,6 +20,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 300
+                  to: 0
                 model:
                   expr: sum(rate(flask_http_request_total{status=~"5.."}[5m])) / sum(rate(flask_http_request_total[5m]))
               - refId: C
@@ -37,6 +40,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 300
+                  to: 0
                 model:
                   expr: up{job="flask-service"} == 0
               - refId: C
@@ -54,6 +60,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 300
+                  to: 0
                 model:
                   expr: histogram_quantile(0.95, sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le))
               - refId: C
@@ -71,6 +80,9 @@ data:
             data:
               - refId: A
                 datasourceUid: prometheus
+                relativeTimeRange:
+                  from: 900
+                  to: 0
                 model:
                   expr: increase(kube_pod_container_status_restarts_total{namespace="default"}[15m])
               - refId: C
