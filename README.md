@@ -44,7 +44,7 @@ postgres-deployment (1 replica, strategy: Recreate)
 postgres-pvc (StorageClass gp3 → EBS volume via ebs.csi.aws.com)
 ```
 
-Cluster: managed node group, 2 worker nodes [TODO: instance type, e.g. t3.medium], default VPC, Auto Mode off — so I installed and configured the EBS CSI driver myself.
+Cluster: managed node group, 2 worker nodes, default VPC, Auto Mode off — so I installed and configured the EBS CSI driver myself.
 
 > **SCREENSHOT — cluster overview.** 
 > <img width="1600" height="900" alt="Screenshot (88)" src="https://github.com/user-attachments/assets/f944e54a-d392-4ba8-81e3-e5b201fe4746" />
@@ -70,7 +70,6 @@ Cluster: managed node group, 2 worker nodes [TODO: instance type, e.g. t3.medium
 └── .github/workflows/            # CI
 ```
 
-[TODO: adjust the tree to match your real repo]
 
 Design rules I followed in the chart:
 
