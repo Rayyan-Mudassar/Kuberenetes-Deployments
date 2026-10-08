@@ -3,12 +3,11 @@ kind: Ingress
 metadata:
   name: people-directory-ingress
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
 spec:
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.className }}
   rules:
-    - host: {{ .Values.ingress.host }}
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -17,3 +16,6 @@ spec:
                 name: flask-service
                 port:
                   number: {{ .Values.flask.port }}
+      {{- with .Values.ingress.host }}
+      host: {{ . }}
+      {{- end }}

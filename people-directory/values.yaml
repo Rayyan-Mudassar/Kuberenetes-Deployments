@@ -1,15 +1,39 @@
 flask:
   image:
     repository: rayyan0426/k8s-app
-    tag: latest
+    tag: SHA
   replicas: 2
   port: 5000
+  targetPort: 5000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
 
 postgres:
   image: postgres:15
   storageSize: 1Gi
+  storageClass: gp3
   dbName: peopledb
   dbUser: appuser
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 ingress:
   host: people-directory.local
+  enabled: false
+  name: people-directory-ingress
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+
+service:
+  type: LoadBalancer

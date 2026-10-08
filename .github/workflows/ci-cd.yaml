@@ -1,64 +1,131 @@
-name: CI/CD - people-directory
+name: CI/CD - build, push to ECR, deploy to EKS
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege for the GITHUB_TOKEN.
+# id-token: write lets the job request an OIDC token so AWS can trust it
+# (no long-lived AWS keys stored in GitHub).
+permissions:
+  contents: read
+  id-token: write
+
+# AWS steps (push to ECR, deploy to EKS) only run when the repo variable
+# AWS_ENABLED is set to 'true' (GitHub > Settings > Secrets and variables > Actions > Variables).
+# Not set = lint, template, build (and later Trivy) still run and stay green, with no AWS needed.
+
+# Never run two deploys at the same time on the same branch.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  IMAGE: rayyan0426/people-directory
-  NAMESPACE: default
+  AWS_REGION: eu-north-1
+  EKS_CLUSTER: People-Directory
+  ECR_REPOSITORY: personal/people-directory   # CHANGE: your ECR repo name
+  APP_DIR: .                         # CHANGE: folder that contains the Dockerfile
+  CHART_PATH: people-directory                      # CHANGE: folder that contains Chart.yaml
+  VALUES_FILE: people-directory/values.yaml       # CHANGE: path from repo root
+  RELEASE_NAME: people-directory     # CHANGE: must match `helm list -n people-directory`
+  NAMESPACE: people-directory
 
 jobs:
-  build-and-deploy:
-    runs-on: self-hosted   # <-- must be the runner on your minikube VM
+  # ---------------------------------------------------------------------------
+  # JOB 1: build (runs on PRs and on main)
+  # On PRs it only validates. On main it also pushes to ECR.
+  # ---------------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ steps.push.outputs.repository }}
+    steps:
+      # 1. Get the code
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      # 2. Validate the Helm chart before anything touches AWS
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint "$CHART_PATH" -f "$VALUES_FILE"
+
+      # Render the chart to plain YAML. Needs no cluster, catches template errors.
+      - name: Helm template
+        run: helm template "$RELEASE_NAME" "$CHART_PATH" -f "$VALUES_FILE" > /dev/null
+
+      # 3. Build the image locally on the runner, tagged with the commit SHA.
+      #    Not pushed yet: we want to be able to scan it first.
+      - name: Build image
+        run: docker build -t "$ECR_REPOSITORY:${GITHUB_SHA}" "$APP_DIR"
+
+      # ---- TRIVY GOES HERE (stage 2): scan the local image, fail on HIGH/CRITICAL ----
+
+      # 4. Everything below only runs on main (never on pull requests)
+      - name: Configure AWS credentials (OIDC)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag and push to ECR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
+        id: push
+        run: |
+          REPO="${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}"
+          docker tag "$ECR_REPOSITORY:${GITHUB_SHA}" "$REPO:${GITHUB_SHA}"
+          docker push "$REPO:${GITHUB_SHA}"
+          echo "repository=$REPO" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # JOB 2: deploy (main only, and only if build succeeded)
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install deps & run tests
-        run: |
-          pip install -r requirements.txt --break-system-packages
-          pytest -q
-
-      - name: Set image tag
-        id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Docker login
-        uses: docker/login-action@v3
+      # 5. Authenticate to AWS again (jobs do not share credentials)
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          role-to-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build image
-        run: docker build -t $IMAGE:${{ steps.vars.outputs.sha_short }} -t $IMAGE:latest .
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
-      - name: Push image
+      # 6. Write a kubeconfig that points kubectl/helm at the EKS cluster.
+      #    The token comes from the IAM role, so the role needs an EKS access entry.
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+
+      # 7. Deploy. --atomic rolls back automatically if the release fails,
+      #    --wait blocks until pods are Ready (your readiness probes matter here).
+      - name: Helm upgrade --install
         run: |
-          docker push $IMAGE:${{ steps.vars.outputs.sha_short }}
-          docker push $IMAGE:latest
+          helm upgrade --install "$RELEASE_NAME" "$CHART_PATH" \
+            --namespace "$NAMESPACE" --create-namespace \
+            -f "$VALUES_FILE" \
+            --set flask.image.repository="${{ needs.build.outputs.repository }}" \
+            --set flask.image.tag="${GITHUB_SHA}" \
+            --atomic --wait --timeout 5m
+          # DB password: inject from a GitHub secret, never commit it. Example:
+          #   --set-string postgres.password="${{ secrets.POSTGRES_PASSWORD }}" \
 
-      - name: Deploy to minikube
-        run: |
-          kubectl apply -f k8s/flask-deployment.yaml
-          kubectl apply -f k8s/postgres-deployment.yaml
-          kubectl apply -f k8s/postgres-pvc.yaml
-          kubectl apply -f k8s/postgres-secret.yaml
-          kubectl apply -f k8s/postgres-service.yaml
-          kubectl apply -f k8s/flask-service.yaml
-          kubectl apply -f k8s/servicemonitor.yaml
-
-          kubectl set image deployment/flask-deployment \
-            flask=$IMAGE:${{ steps.vars.outputs.sha_short }} \
-            -n $NAMESPACE
-          kubectl rollout status deployment/flask-deployment -n $NAMESPACE --timeout=120s
-
-      - name: Smoke test
-        run: |
-          URL=$(minikube service flask-service --url -n $NAMESPACE)
-          curl -f "$URL/api/health" || (echo "smoke test failed" && exit 1)
-
-      - name: Apply Grafana alert rules
-        run: |
-          kubectl apply -f monitoring/alert-rules.yaml -n monitoring
+      # 8. Show what is running, for the logs
+      - name: Verify
+        run: kubectl get pods,svc,ingress -n "$NAMESPACE"

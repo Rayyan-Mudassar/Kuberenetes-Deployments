@@ -12,12 +12,19 @@ spec:
       labels:
         app: flask
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: flask
-          image: "{{ .Values.flask.image.repository }}:{{ .Values.flask.image.tag }}"
-          imagePullPolicy: Always
+          image: "{{ .Values.flask.image.repository }}:{{ required "set flask.image.tag" .Values.flask.image.tag }}"
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: {{ .Values.flask.port }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: POSTGRES_HOST
               value: postgres-service
@@ -33,19 +40,14 @@ spec:
           readinessProbe:
             httpGet:
               path: /api/health
-              port: 5000
+              port: {{ .Values.flask.port }}
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /api/health
-              port: 5000
+              port: {{ .Values.flask.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "300m"
-              memory: "256Mi"
+            {{- toYaml .Values.flask.resources | nindent 12 }}
