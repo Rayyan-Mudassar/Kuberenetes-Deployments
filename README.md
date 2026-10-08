@@ -174,8 +174,7 @@ Verified by adding people through the UI, deleting the Postgres pod directly, an
 Two EBS-specific details:
 
 - The Postgres Deployment uses `strategy: Recreate`. An EBS volume attaches t<img width="1600" height="900" alt="Screenshot (85)" src="https://github.com/user-attachments/assets/77d4bcaa-3dc7-4a2f-99ee-353ea6b97483" />
-o one node at a time, so a rolling update could try to start the new pod while the old one still holds the volume.
-- [TODO: if you set `PGDATA` to a subfolder, say so here. The fresh EBS volume has a `lost+found` folder at its root, which Postgres refuses to initialise over. 
+o one node at a time, so a rolling update could try to start the new pod while the old one still holds the volume. 
 
 > **SCREENSHOT — persistence test (before).**
 > <img width="1600" height="900" alt="Screenshot (85)" src="https://github.com/user-attachments/assets/0db7ca1d-0cd1-49e8-bff2-67488d999454" />
