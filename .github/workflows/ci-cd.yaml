@@ -52,12 +52,11 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Helm lint
-        run: helm lint "$CHART_PATH" -f "$VALUES_FILE"
+        run: helm lint "$CHART_PATH" -f "$VALUES_FILE" --set-string postgres.dbPassword=ci-validation-only
 
       # Render the chart to plain YAML. Needs no cluster, catches template errors.
       - name: Helm template
-        run: helm template "$RELEASE_NAME" "$CHART_PATH" -f "$VALUES_FILE" > /dev/null
-
+        run: helm template "$RELEASE_NAME" "$CHART_PATH" -f "$VALUES_FILE" --set-string postgres.dbPassword=ci-validation-only > /dev/null
       # 3. Build the image locally on the runner, tagged with the commit SHA.
       #    Not pushed yet: we want to be able to scan it first.
       - name: Build image
