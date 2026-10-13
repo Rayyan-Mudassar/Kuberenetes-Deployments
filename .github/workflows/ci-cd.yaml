@@ -48,8 +48,18 @@ jobs:
       
       - name: Build image
         run: docker build -t "$ECR_REPOSITORY:${GITHUB_SHA}" "$APP_DIR"
-
       
+      - name: Debug OIDC claims
+        run: |
+          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c "import sys,json;print(json.load(sys.stdin)['value'])")
+          python3 - "$TOKEN" <<'EOF'
+          import sys,base64,json
+          p=sys.argv[1].split('.')[1]; p+='='*(-len(p)%4)
+          c=json.loads(base64.urlsafe_b64decode(p))
+          print({k:c[k] for k in ('sub','aud','repository','ref')})
+          EOF
+           
       - name: Configure AWS credentials (OIDC)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
         uses: aws-actions/configure-aws-credentials@v4
