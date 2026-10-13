@@ -112,7 +112,7 @@ jobs:
             -f "$VALUES_FILE" \
             --set flask.image.repository="${{ needs.build.outputs.repository }}" \
             --set flask.image.tag="${GITHUB_SHA}" \
-            --set-string postgres.password="${{ secrets.POSTGRES_PASSWORD }}" \
+            --set postgres.dbPassword="${{ secrets.POSTGRES_PASSWORD }}" \
             --atomic --wait --timeout 5m
       - name: Verify
         run: kubectl get pods,svc,ingress -n "$NAMESPACE"
