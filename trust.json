@@ -6,7 +6,12 @@
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
-      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:Rayyan-Mudassar/*"}
+      "StringLike": {
+        "token.actions.githubusercontent.com:sub": [
+          "repo:Rayyan-Mudassar@247426734/Kuberenetes-Deployments@1335925370:ref:refs/heads/main",
+          "repo:Rayyan-Mudassar/Kuberenetes-Deployments:ref:refs/heads/main"
+  ]
+}
     }
   }]
 }
