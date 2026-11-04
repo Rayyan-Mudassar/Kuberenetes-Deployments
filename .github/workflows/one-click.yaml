@@ -1,0 +1,48 @@
+name: one-click
+ 
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [up, down]
+        default: up
+ 
+permissions:
+  id-token: write
+  contents: read
+ 
+jobs:
+  infra-up:
+    if: inputs.action == 'up'
+    uses: ./.github/workflows/_terraform.yaml
+    with: { dir: infra, action: apply }
+    secrets: inherit
+ 
+  platform-up:
+    if: inputs.action == 'up'
+    needs: infra-up
+    uses: ./.github/workflows/_terraform.yaml
+    with: { dir: platform, action: apply }
+    secrets: inherit
+ 
+  # Uncomment AFTER you add `workflow_call:` under `on:` in your existing ci-cd.yaml
+  # deploy-app:
+  #   if: inputs.action == 'up'
+  #   needs: platform-up
+  #   uses: ./.github/workflows/ci-cd.yaml
+  #   secrets: inherit
+ 
+  platform-down:
+    if: inputs.action == 'down'
+    uses: ./.github/workflows/_terraform.yaml
+    with: { dir: platform, action: destroy }
+    secrets: inherit
+ 
+  infra-down:
+    if: inputs.action == 'down'
+    needs: platform-down
+    uses: ./.github/workflows/_terraform.yaml
+    with: { dir: infra, action: destroy }
+    secrets: inherit
+ 

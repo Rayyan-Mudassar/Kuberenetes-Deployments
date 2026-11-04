@@ -1,0 +1,29 @@
+name: platform
+ 
+on:
+  pull_request:
+    paths:
+      - "platform/**"
+      - ".github/workflows/_terraform.yaml"
+      - ".github/workflows/platform.yaml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do inside the cluster (needs the cluster to exist)
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+ 
+permissions:
+  id-token: write
+  contents: read
+ 
+jobs:
+  terraform:
+    uses: ./.github/workflows/_terraform.yaml
+    with:
+      dir: platform
+      # PRs only fmt/validate: a real plan needs the cluster, which is usually destroyed between sessions.
+      action: ${{ inputs.action || 'validate' }}
+    secrets: inherit
+ 

@@ -1,0 +1,28 @@
+name: infra
+ 
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/_terraform.yaml"
+      - ".github/workflows/infra.yaml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do with the AWS infrastructure
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+ 
+permissions:
+  id-token: write
+  contents: read
+ 
+jobs:
+  terraform:
+    uses: ./.github/workflows/_terraform.yaml
+    with:
+      dir: infra
+      action: ${{ inputs.action || 'plan' }} # pull requests only ever plan
+    secrets: inherit
+ 

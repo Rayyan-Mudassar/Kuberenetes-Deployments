@@ -1,0 +1,55 @@
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+# kube-proxy metrics bind to 127.0.0.1 on EKS nodes by default, so also unreachable.
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    # Pick up ServiceMonitors / PodMonitors / PrometheusRules from ALL namespaces,
+    # not only ones labelled `release: monitoring`. Removes a whole class of "silent no-data" bugs.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+grafana:
+  # EBS volumes attach to ONE node. Recreate avoids a new pod waiting on a volume the old pod still holds.
+  deploymentStrategy:
+    type: Recreate
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    accessModes: ["ReadWriteOnce"]
+    size: 5Gi
+  service:
+    type: ClusterIP # NOT public. Access with: kubectl port-forward svc/monitoring-grafana 3000:80 -n monitoring
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi

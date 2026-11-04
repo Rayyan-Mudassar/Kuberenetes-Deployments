@@ -1,0 +1,101 @@
+name: _terraform (reusable)
+ 
+on:
+  workflow_call:
+    inputs:
+      dir:
+        type: string
+        required: true
+      action:
+        type: string
+        required: true
+ 
+permissions:
+  id-token: write # lets the job request a GitHub OIDC token (no stored AWS keys)
+  contents: read
+ 
+env:
+  AWS_REGION: eu-north-1
+  CLUSTER_NAME: directory-cluster-tf
+  TF_VAR_admin_principal_arns: ${{ vars.ADMIN_PRINCIPAL_ARNS || '[]' }}
+  TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+ 
+jobs:
+  # Runs for every action: format check, init, validate, and (except "validate") a plan.
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.dir }}
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+ 
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.11"
+ 
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false
+      - run: terraform validate
+ 
+      - name: Plan
+        if: inputs.action != 'validate'
+        run: |
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform plan -input=false -destroy
+          else
+            terraform plan -input=false
+          fi
+ 
+  # Only for apply/destroy. Pauses until you approve the "production" environment in GitHub.
+  apply:
+    needs: plan
+    if: inputs.action == 'apply' || inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ${{ inputs.dir }}
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+ 
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.11"
+ 
+      - run: terraform init -input=false
+ 
+      # Helm/Terraform can't clean up what the app pipeline created (volumes, load balancers).
+      # Leftovers cost money and can block VPC deletion, so remove them first.
+      - name: Pre-destroy cleanup
+        if: inputs.action == 'destroy' && inputs.dir == 'platform'
+        run: |
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+          helm uninstall people-directory -n people-directory --wait --timeout 5m || true
+          kubectl delete pvc --all -n people-directory --timeout=300s || true
+ 
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform apply -input=false -auto-approve
+ 
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform destroy -input=false -auto-approve
+ 
+      # Helm uninstall leaves StatefulSet volumes behind (Prometheus). Delete while the EBS driver still exists.
+      - name: Post-destroy cleanup
+        if: inputs.action == 'destroy' && inputs.dir == 'platform'
+        run: |
+          kubectl delete pvc --all -n monitoring --timeout=300s || true
+          kubectl wait --for=delete pv --all --timeout=300s || true
+ 

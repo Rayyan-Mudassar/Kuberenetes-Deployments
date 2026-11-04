@@ -3,6 +3,7 @@ name: CI/CD - build, push to ECR, deploy to EKS
 on:
   push:
     branches: [main]
+  workflow_call:
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -102,7 +103,7 @@ jobs:
 
       
       - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+        run: aws eks update-kubeconfig --name directory-cluster-tf --region "$AWS_REGION"
 
       
       - name: Helm upgrade --install
