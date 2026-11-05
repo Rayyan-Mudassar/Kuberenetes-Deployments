@@ -5,6 +5,8 @@ import psycopg2
 import psycopg2.extras
 
 app = Flask(__name__)
+from prometheus_flask_exporter import PrometheusMetrics
+metrics = PrometheusMetrics(app)
 
 DB_HOST = os.environ.get("POSTGRES_HOST", "postgres-service")
 DB_NAME = os.environ.get("POSTGRES_DB", "peopledb")

@@ -37,3 +37,11 @@ ingress:
 
 service:
   type: LoadBalancer
+
+serviceMonitor:
+  enabled: true
+  portName: http
+  path: /metrics
+  interval: 30s
+  selectorLabels:
+    app: flask
