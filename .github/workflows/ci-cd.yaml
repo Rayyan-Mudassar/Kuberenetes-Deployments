@@ -18,12 +18,12 @@ concurrency:
 
 env:
   AWS_REGION: eu-north-1
-  EKS_CLUSTER: directory-cluster
-  ECR_REPOSITORY: personal/people-direcory  
-  APP_DIR: .                         
-  CHART_PATH: people-directory                    
-  VALUES_FILE: people-directory/values.yaml       
-  RELEASE_NAME: people-directory     
+  EKS_CLUSTER: directory-cluster-tf          # CHANGED: new Terraform-built cluster
+  ECR_REPOSITORY: personal/people-direcory
+  APP_DIR: .
+  CHART_PATH: people-directory
+  VALUES_FILE: people-directory/values.yaml
+  RELEASE_NAME: people-directory
   NAMESPACE: people-directory
 
 jobs:
@@ -32,25 +32,25 @@ jobs:
     outputs:
       repository: ${{ steps.push.outputs.repository }}
     steps:
-      
       - name: Checkout
         uses: actions/checkout@v4
 
-      
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
       - name: Helm lint
         run: helm lint "$CHART_PATH" -f "$VALUES_FILE" --set-string postgres.dbPassword=ci-validation-only
 
-      
       - name: Helm template
         run: helm template "$RELEASE_NAME" "$CHART_PATH" -f "$VALUES_FILE" --set-string postgres.dbPassword=ci-validation-only > /dev/null
-      
+
       - name: Build image
         run: docker build -t "$ECR_REPOSITORY:${GITHUB_SHA}" "$APP_DIR"
-      
+
+      # CHANGED: skipped on PRs (no OIDC token there) and never fails the build
       - name: Debug OIDC claims
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
         run: |
           TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c "import sys,json;print(json.load(sys.stdin)['value'])")
@@ -60,7 +60,7 @@ jobs:
           c=json.loads(base64.urlsafe_b64decode(p))
           print({k:c[k] for k in ('sub','aud','repository','ref')})
           EOF
-           
+
       - name: Configure AWS credentials (OIDC)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
         uses: aws-actions/configure-aws-credentials@v4
@@ -73,6 +73,14 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # NEW: create the ECR repo if it doesn't exist in this account (avoids "repository does not exist")
+      - name: Ensure ECR repository exists
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
+        run: |
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$ECR_REPOSITORY" \
+                 --image-scanning-configuration scanOnPush=true
+
       - name: Tag and push to ECR
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
         id: push
@@ -82,7 +90,6 @@ jobs:
           docker push "$REPO:${GITHUB_SHA}"
           echo "repository=$REPO" >> "$GITHUB_OUTPUT"
 
- 
   deploy:
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
@@ -91,7 +98,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -101,11 +107,10 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      
+      # CHANGED: uses the env var instead of a hardcoded name
       - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name directory-cluster-tf --region "$AWS_REGION"
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
 
-      
       - name: Helm upgrade --install
         run: |
           helm upgrade --install "$RELEASE_NAME" "$CHART_PATH" \
@@ -115,5 +120,6 @@ jobs:
             --set flask.image.tag="${GITHUB_SHA}" \
             --set postgres.dbPassword="${{ secrets.POSTGRES_PASSWORD }}" \
             --atomic --wait --timeout 5m
+
       - name: Verify
         run: kubectl get pods,svc,ingress -n "$NAMESPACE"
