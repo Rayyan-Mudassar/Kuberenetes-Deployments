@@ -13,7 +13,7 @@ variable "region" {
 variable "github_repo" {
   description = "owner/repo that is allowed to assume the role"
   type        = string
-  default     = "Rayyan-Mudassar/Kuberenetes-Deployments"
+  default     = "Rayyan-Mudassar@247426734/Kuberenetes-Deployments@1335925370"
 }
 
 provider "aws" {
