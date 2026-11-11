@@ -81,7 +81,7 @@ jobs:
             || aws ecr create-repository --repository-name "$ECR_REPOSITORY" \
                  --image-scanning-configuration scanOnPush=true
 
-            - name: Tag and push to ECR
+      - name: Tag and push to ECR
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
         id: push
         run: |
