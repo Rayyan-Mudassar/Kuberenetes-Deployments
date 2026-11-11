@@ -18,7 +18,9 @@ A small people-directory app (add up to 5 people, click a card to flip it and se
 - **Orchestration:** Kubernetes — minikube locally, Amazon EKS (eu-north-1) in AWS
 - **Storage:** EBS gp3 volumes via the EBS CSI driver
 - **Containerization:** Docker, non-root hardened image
-- **Monitoring:** Prometheus + Grafana (RED and USE dashboards), not done on EKS yet.
+- **Monitoring:** Prometheus + Grafana (RED and USE dashboards).
+- **IaC**: Used Terraform to automate the infra after creating the cluster 2 times.
+
 
 ## Architecture (EKS)
 
@@ -86,7 +88,7 @@ Design rules I followed in the chart:
 
 ```bash
 aws sts get-caller-identity
-aws eks update-kubeconfig --region eu-north-1 --name People-Directory
+aws eks update-kubeconfig --region eu-north-1 --name directory-cluster-tf
 kubectl get nodes
 ```
 
@@ -164,6 +166,100 @@ helm history people-directory -n people-directory
 > <img width="1600" height="900" alt="Screenshot (92)" src="https://github.com/user-attachments/assets/74712948-24b3-42c2-89dd-8e56d249ef7a" />
 
 ---
+## CI/CD and Infrastructure as Code
+
+The whole project runs through GitHub Actions and Terraform. Pull requests are validated automatically, every push to `main` builds and deploys the app, and the entire AWS environment can be created or destroyed from the Actions tab with a single button. No AWS access keys are stored anywhere: every job authenticates to AWS with GitHub OIDC.
+
+### Overview
+
+```
+                    ┌─────────────── one-click.yaml (up) ───────────────┐
+                    │                                                   │
+ Terraform:   infra apply  ──►  platform apply  ──►  CI/CD pipeline (ci-cd.yaml)
+              (EKS cluster)     (monitoring)         build → push to ECR → helm deploy
+                    │                                                   │
+                    └────── one-click.yaml (down) runs in reverse ──────┘
+                            platform destroy ──► infra destroy
+```
+
+### 1. CI/CD pipeline (`ci-cd.yaml`)
+
+Triggers: pull requests to `main`, pushes to `main`, manual run, and as a reusable step called by `one-click`.
+
+**`build` job**
+1. Checkout the repo
+2. `helm lint` and `helm template` the chart with a dummy password, so broken YAML or bad values fail the pipeline before anything touches AWS
+3. `docker build` the image, tagged with the commit SHA
+4. Authenticate to AWS through OIDC (skipped on pull requests)
+5. Log in to ECR and create the repository if it doesn't exist (scan on push enabled)
+6. Push the image, skipping the push if that SHA tag already exists, since the repository's tags are immutable
+
+**`deploy` job** (only on `main`, never on pull requests)
+1. Authenticate to AWS through OIDC
+2. `aws eks update-kubeconfig` to connect to the Terraform-built cluster
+3. `helm upgrade --install` with the new image repository and tag, and the database password injected from a GitHub secret
+4. `--atomic --wait --timeout 5m`: if the new pods don't become Ready, Helm rolls the release back automatically
+5. `kubectl get pods,svc,ingress` to verify the result
+
+Design choices:
+- **Pull requests only validate.** They lint, template and build, but never get AWS credentials and never deploy.
+- **Image tag = commit SHA**, so every running pod can be traced to the exact commit that built it, and a rollback is just redeploying an older SHA.
+- **Concurrency group** per branch, so two deploys never run on the same ref at once.
+- **No secrets in files.** The database password and Grafana password come from GitHub secrets, and AWS access comes from OIDC.
+
+### 2. Terraform (infrastructure as code)
+
+After building the cluster by hand in the console twice, I rebuilt it in Terraform so it's reproducible. It's split into three layers with separate state, because each has a different lifecycle:
+
+| Layer | What it creates |
+|---|---|
+| `bootstrap/` | One-time setup: S3 bucket for remote state and the GitHub OIDC provider and IAM role |
+| `infra/` | The AWS side: the EKS cluster `directory-cluster-tf` and everything it needs |
+| `platform/` | What runs inside the cluster: the monitoring stack (Prometheus and Grafana) |
+
+State lives remotely in S3. `platform` reads from the cluster, so it can only be applied after `infra`.
+
+### 3. Workflows
+
+| File | Role |
+|---|---|
+| `_terraform.yaml` | Reusable workflow that every Terraform run goes through |
+| `infra.yaml` | Button for the `infra` layer (plan, apply or destroy). A PR touching `infra/` runs a plan |
+| `platform.yaml` | Button for the `platform` layer. A PR touching `platform/` runs fmt and validate only, because a real plan needs the cluster to exist |
+| `ci-cd.yaml` | Build, push and deploy the app (section 1) |
+| `one-click.yaml` | Runs everything in order with a single button |
+
+**`_terraform.yaml`** takes a directory and an action (`validate`, `plan`, `apply` or `destroy`):
+- **`plan` job:** `terraform fmt -check`, `init`, `validate`, then `plan` (or `plan -destroy`)
+- **`apply` job:** only for apply or destroy. It waits for manual approval through the `production` GitHub environment, so nothing changes in AWS without me clicking Approve
+- **Pre-destroy cleanup:** uninstalls the Helm release and deletes the PVCs first, so the load balancers and EBS volumes the app created don't block the VPC deletion
+- **Post-destroy cleanup:** removes the leftover monitoring volumes
+
+### 4. One-click up / down (`one-click.yaml`)
+
+A single manual workflow with one input:
+
+```
+up:    infra apply  →  platform apply  →  deploy app (ci-cd.yaml)
+down:  platform destroy  →  infra destroy
+```
+
+- **up** builds the whole stack from nothing: cluster, monitoring, image build, ECR push, and Helm deploy.
+- **down** tears it down in reverse, so I can run the project for a session and shut it off, instead of paying for the control plane, nodes and load balancer while idle.
+
+To run it: Actions tab → **one-click** → Run workflow → `up` or `down` → approve the `production` environment when it pauses.
+
+### 5. Authentication (GitHub OIDC)
+
+Each job requests a short-lived OIDC token from GitHub and exchanges it for temporary AWS credentials by assuming an IAM role. There are no AWS access keys in GitHub. Secrets in use: `AWS_ROLE_ARN`, `POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD`.
+
+### 6. Problems I hit while automating it
+
+- **Run workflow button missing:** manual-run buttons only appear for workflows on the repository's default branch, and mine was still set to `master`. Switching the default to `main` fixed it.
+- **ECR push failed with "tag is immutable":** a push to `main` had already pushed that commit SHA before `one-click` tried to push it again. Fixed by checking whether the tag exists in ECR and skipping the push if it does.
+- **`terraform destroy` stuck on load balancers:** the load balancer was created by the app, not by Terraform, so it blocked the VPC deletion. Fixed with the pre-destroy cleanup step.
+
+
 
 ## Persistent storage
 
@@ -256,16 +352,12 @@ The EKS control plane alone costs roughly $0.10/hour at the time of writing (che
 
 ## Limitations (what this is not yet)
 
-- The cluster was created in the console, so it isn't reproducible yet.
 - Plain HTTP on a load balancer hostname: no HTTPS, no Ingress, no custom domain.
 - Postgres is a single Deployment: no replication or backups. A StatefulSet is the better model for a real database.
 - The database password is passed with `--set`, and Kubernetes Secrets are only base64-encoded, not encrypted. A real setup would use AWS Secrets Manager.
-- CI doesn't deploy to EKS yet.
 
 ## Next steps
 
-- Recreate the cluster with Terraform
-- GitHub Actions deploying to EKS using OIDC (no long-lived AWS keys)
 - ALB Ingress with HTTPS (ACM certificate)
 - Trivy image scanning in CI/CD
 - ArgoCD for GitOps-based deployment
