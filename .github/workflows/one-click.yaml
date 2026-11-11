@@ -26,12 +26,12 @@ jobs:
     with: { dir: platform, action: apply }
     secrets: inherit
  
-  # Uncomment AFTER you add `workflow_call:` under `on:` in your existing ci-cd.yaml
-  # deploy-app:
-  #   if: inputs.action == 'up'
-  #   needs: platform-up
-  #   uses: ./.github/workflows/ci-cd.yaml
-  #   secrets: inherit
+  
+  deploy-app:
+    if: inputs.action == 'up'
+    needs: platform-up
+    uses: ./.github/workflows/ci-cd.yaml
+    secrets: inherit
  
   platform-down:
     if: inputs.action == 'down'
