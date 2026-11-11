@@ -81,15 +81,19 @@ jobs:
             || aws ecr create-repository --repository-name "$ECR_REPOSITORY" \
                  --image-scanning-configuration scanOnPush=true
 
-      - name: Tag and push to ECR
+            - name: Tag and push to ECR
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
         id: push
         run: |
           REPO="${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}"
-          docker tag "$ECR_REPOSITORY:${GITHUB_SHA}" "$REPO:${GITHUB_SHA}"
-          docker push "$REPO:${GITHUB_SHA}"
           echo "repository=$REPO" >> "$GITHUB_OUTPUT"
-
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="${GITHUB_SHA}" >/dev/null 2>&1; then
+            echo "Image ${GITHUB_SHA} already in ECR, skipping push"
+          else
+            docker tag "$ECR_REPOSITORY:${GITHUB_SHA}" "$REPO:${GITHUB_SHA}"
+            docker push "$REPO:${GITHUB_SHA}"
+          fi
   deploy:
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ENABLED == 'true'
